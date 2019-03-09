@@ -1,0 +1,10 @@
+{
+  "startingRoom": "MatthewsStreet",
+  "endingRoom": "Siebel1314",
+  "rooms": [
+    {
+      "name": "MatthewsStreet",
+      "description": "You are on Matthews outside the Siebel Center"
+    }
+  ]
+}
