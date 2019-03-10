@@ -1,13 +1,15 @@
 module Lib where
 
 import Control.Applicative hiding (many)
+import Control.Monad.State
 
+import Data.List
 import Data.Maybe
 
 data Parser a = Parser (String -> Maybe (String, a))
 
 instance Functor Parser where
-    fmap f (Parser parse) = Parser $ \s -> fmap ((\(a,b) -> (a, f b)) $ parse s
+    fmap f (Parser parse) = Parser $ \s -> fmap (fmap f) $ parse s
 
 instance Applicative Parser where
     pure v = Parser $ \s -> Just (s, v)
@@ -22,8 +24,8 @@ instance Monad Parser where
 
     (Parser f) >>= g = Parser $ \s -> do
         (rest, temp) <- f s
-        parser <- g temp
-        pure $ parse rest
+        let (Parser parser) = g temp
+        parser rest
 
 instance Alternative Parser where
     empty = Parser $ const Nothing
@@ -47,7 +49,7 @@ oneOf = choice . map char
 
 digit = oneOf "12343567890"
 letter = oneOf $ ['a'..'z'] ++ ['A'..'Z']
-symbolChar = oneOf "!@#$%^&*(),./<>?:;-' _=+"
+symbolChar = oneOf "!@#$%^&*(),./<>?:;-' _=+~`[]{}\\|\n\r"
 
 sepEndBy1 :: Parser a -> Parser b -> Parser [b]
 sepEndBy1 sep parser = do
@@ -81,7 +83,7 @@ surrounded start end = between (symbol (string start)) (symbol (string end))
 
 parse (Parser parser) str = parser str
 
-data JSONObject = IntVal Integer
+data JSONObject = FloatVal Float
                 | Null
                 | StringVal String
                 | BoolVal Bool
@@ -90,7 +92,7 @@ data JSONObject = IntVal Integer
     deriving (Show, Eq)
 
 jsonObject = jsonBool <|>
-             jsonInt <|>
+             jsonFloat <|>
              jsonStr <|>
              jsonNull <|>
              jsonArray <|>
@@ -117,8 +119,63 @@ jsonStr = StringVal <$> between quote quote (many (letter <|> digit <|> symbolCh
 jsonBool = (symbol (string "true") >> pure (BoolVal True)) <|>
            (symbol (string "false") >> pure (BoolVal False))
 
-jsonInt = do
+digs = do
     first <- digit
     rest <- many digit
-    pure $ IntVal $ read $ first:rest
+    pure $ first:rest
+
+jsonFloat = do
+    neg <- optional $ char '-'
+    first <- digs
+    second <- optional $ do
+        char '.'
+        digs
+
+    let mul = maybe 1 (const (-1)) neg
+    pure $ FloatVal $ mul * read (first ++ "." ++ fromMaybe "0" second)
+
+data JavaClass = JavaClass String [Field]
+    deriving (Show,Eq)
+
+data Field = Field String String
+    deriving (Show,Eq)
+
+class PrettyPrint a where
+    prettyPrint :: a -> String
+
+instance PrettyPrint JavaClass where
+    prettyPrint (JavaClass name fields) =
+        "public class " ++ name ++ " {\n" ++
+        intercalate "\n" (map (("    "++) . prettyPrint) fields) ++ "\n}"
+
+instance PrettyPrint Field where
+    prettyPrint (Field name typeName) = "private final " ++ typeName ++ " " ++ name ++ ";"
+
+increment = do
+    i <- get
+    modify (+1)
+    pure i
+
+toClass :: JSONObject -> State Integer JavaClass
+toClass (Pairs keyVals) = do
+    fields <- mapM pairToField keyVals
+    i <- increment
+    pure $ JavaClass ("Test" ++ show i) fields
+
+typeName :: JSONObject -> State Integer String
+typeName (FloatVal _) = pure $ "float"
+typeName (StringVal _) = pure $ "String"
+typeName (BoolVal _) = pure $ "boolean"
+typeName Null = pure $ "Object"
+typeName (Array (obj:_)) = do
+    tName <- typeName obj
+    pure $ tName ++ "[]"
+typeName (Pairs vals) = do
+    i <- increment
+    pure $ "test" ++ show i
+
+pairToField :: (String, JSONObject) -> State Integer Field
+pairToField (name, val) = do
+    tName <- typeName val
+    pure $ Field name tName
 
